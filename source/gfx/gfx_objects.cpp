@@ -47,10 +47,11 @@ void LittleGFXAdapter::selectQueueIndices()
 
 bool LittleGFXInstance::Initialize(bool enableDebugLayer)
 {
+    // volk需要初始化，这个初始化过程其实就是在LoadLibrary("vulkan-1.dll")
     static VkResult volkInit = volkInitialize();
     if (volkInit != VK_SUCCESS)
     {
-        assert((volkInit == VK_SUCCESS) && "Volk Initialize Failed!");
+        assert(0 && "Volk Initialize Failed!");
         return false;
     }
     selectExtensionsAndLayers(enableDebugLayer);
@@ -64,18 +65,19 @@ bool LittleGFXInstance::Initialize(bool enableDebugLayer)
     VkInstanceCreateInfo createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
-    // Instance Layers
+    // 填写我们上文筛选出的可以打开的层以及扩展
     createInfo.enabledLayerCount = (uint32_t)instanceLayers.size();
     createInfo.ppEnabledLayerNames = instanceLayers.data();
-    // Instance Extensions
     createInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
     createInfo.ppEnabledExtensionNames = instanceExtensions.data();
+    // 创建VkInstance
     if (vkCreateInstance(&createInfo, nullptr, &vkInstance) != VK_SUCCESS)
     {
         assert(0 && "Vulkan: failed to create instance!");
     }
     // 使用volk的动态加载方法，直接加载Instance中的Vulkan函数地址
     volkLoadInstance(vkInstance);
+    // 直接获取所有的Adapter/PhysicalDevice供以后使用
     fetchAllAdapters();
     return true;
 }
@@ -143,6 +145,8 @@ void LittleGFXInstance::fetchAllAdapters()
     }
 }
 
+// 队列优先级。概念上是分配不同Queue执行调度优先级的参数。
+// 全部给1.f，忽略此参数。
 const float queuePriorities[] = {
     1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, //
     1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, //
@@ -152,6 +156,7 @@ const float queuePriorities[] = {
 bool LittleGFXDevice::Initialize(LittleGFXAdapter* adapter)
 {
     gfxAdapter = adapter;
+    // 要申请的graphics queue
     VkDeviceQueueCreateInfo queueInfo = {};
     queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueInfo.queueCount = 1;
@@ -163,6 +168,7 @@ bool LittleGFXDevice::Initialize(LittleGFXAdapter* adapter)
     deviceInfo.queueCreateInfoCount = 1;
     deviceInfo.pQueueCreateInfos = &queueInfo;
     deviceInfo.pEnabledFeatures = &deviceFeatures;
+    // 打开需要的扩展和层
     deviceInfo.enabledExtensionCount = adapter->deviceExtensions.size();
     deviceInfo.ppEnabledExtensionNames = adapter->deviceExtensions.data();
     deviceInfo.enabledLayerCount = adapter->deviceLayers.size();
@@ -172,6 +178,8 @@ bool LittleGFXDevice::Initialize(LittleGFXAdapter* adapter)
         assert(0 && "failed to create logical device!");
         return false;
     }
+    // 使用volk从device中读出相关的API函数地址
+    // 这些API被放进volkTable中，因为转发层数很少所以性能有一定提升
     volkLoadDeviceTable(&volkTable, vkDevice);
     return true;
 }
@@ -225,7 +233,6 @@ VkPresentModeKHR preferredModeList[] = {
     VK_PRESENT_MODE_FIFO_KHR          // low power consumption
 };
 */
-
 #define clamp(x, min, max) (x) < (min) ? (min) : ((x) > (max) ? (max) : (x))
 void LittleGFXWindow::createSwapchainKHR(LittleGFXDevice* device, bool enableVsync)
 {
@@ -244,19 +251,22 @@ void LittleGFXWindow::createSwapchainKHR(LittleGFXDevice* device, bool enableVsy
     swapchainInfo.flags = 0;
     swapchainInfo.surface = vkSurface;
     swapchainInfo.minImageCount = enableVsync ? 3 : 2;
+    swapchainInfo.presentMode = enableVsync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR;
     // 因为OGL标准，此format和色彩空间一定是被现在的显卡支持的
     swapchainInfo.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
     swapchainInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     swapchainInfo.imageExtent = extent;
     swapchainInfo.imageArrayLayers = 1;
     swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // 反转缓冲区呈现交换链是一种GPU行为，同样是被Queue执行的。这里指定可以执行Present操作的Queue。
     swapchainInfo.queueFamilyIndexCount = 1;
     swapchainInfo.pQueueFamilyIndices = &presentQueueFamilyIndex;
-    swapchainInfo.presentMode = enableVsync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_IMMEDIATE_KHR;
     swapchainInfo.clipped = VK_TRUE;
+    // 在这里指定一个老的交换链可以加速创建
     swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
+    // 可以在呈现时指定某种变换，比如把图片逆时针旋转90度
     swapchainInfo.preTransform = caps.currentTransform;
+    // 是否使用Alpha通道和其它的窗口混合，这里可以实现很多奇特的效果，但是我们不需要。所以设定为OPAQUE（不透明）模式
     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     VkResult res = device->volkTable.vkCreateSwapchainKHR(
         device->vkDevice, &swapchainInfo, nullptr, &vkSwapchain);

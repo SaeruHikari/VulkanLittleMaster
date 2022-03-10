@@ -100,9 +100,7 @@ static const char* wanted_instance_exts[] = {
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
     VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
 #endif
-    /************************************************************************/
-    // Property querying extensions
-    /************************************************************************/
+    //这个扩展允许我们使用DeviceProperties2来查询更多信息
     VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 };
 static const char* wanted_device_exts[] = {
